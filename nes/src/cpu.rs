@@ -102,16 +102,22 @@ impl CPU {
                 .get(&code)
                 .expect(&format!("OpCode {:x} is not recognized", code));
 
-            // OpCode::new(0xa9, "LDA", 2, 2, AddressingMode::Immediate),
-            // OpCode::new(0xa5, "LDA", 2, 3, AddressingMode::ZeroPage),
-            // OpCode::new(0xb5, "LDA", 2, 4, AddressingMode::ZeroPage_X),
-            // OpCode::new(0xad, "LDA", 3, 4, AddressingMode::Absolute),
-            // OpCode::new(0xbd, "LDA", 3, 4/*+1 if page crossed*/, AddressingMode::Absolute_X),
-            // OpCode::new(0xb9, "LDA", 3, 4/*+1 if page crossed*/, AddressingMode::Absolute_Y),
-            // OpCode::new(0xa1, "LDA", 2, 6, AddressingMode::Indirect_X),
-            // OpCode::new(0xb1, "LDA", 2, 5/*+1 if page crossed*/, AddressingMode::Indirect_Y),
-
             match code {
+                0xa2 | 0xa6 | 0xb6 | 0xae | 0xbe => {
+                    self.ldx(&opcode.mode);
+                }
+                0xa0 | 0xa4 | 0xb4 | 0xac | 0xbc => {
+                    self.ldy(&opcode.mode);
+                }
+                0x86 | 0x96 | 0x8e => {
+                    self.stx(&opcode.mode)
+                }
+                0x84 | 0x94 | 0x8c => {
+                    self.sty(&opcode.mode)
+                }
+                0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => {
+                    self.sta(&opcode.mode);
+                }
                 0xe8 => {
                     self.inx();
                 }
@@ -121,12 +127,8 @@ impl CPU {
                 0xaa => {
                     self.tax();
                 }
-                0xc0 => {
-                    // let param = self.mem_read(self.program_counter);
-                    // self.program_counter += 1;
-                    // let cmp = self.register_y - param;
-                    self.cpy(&AddressingMode::Immediate);
-                    self.program_counter += 1;
+                0xc0 | 0xc4 | 0xcc => {
+                    self.cpy(&opcode.mode);
                 }
                 0xa8 => {
                     self.tay();
@@ -165,16 +167,9 @@ impl CPU {
         let m = self.mem_read(addr);
         let cmp: i16 = self.register_y as i16 - m as i16;
 
-        if cmp == 0 {
-            self.set_flag(Flag::Zero, true);
-            self.set_flag(Flag::Carry, true);
-        }
-
-        if cmp < 0 {
-            self.set_flag(Flag::Negative, true);
-        } else {
-            self.set_flag(Flag::Carry, true);
-        }
+        self.set_flag(Flag::Zero, cmp == 0);
+        self.set_flag(Flag::Carry, cmp >= 0);
+        self.set_flag(Flag::Negative, cmp < 0);
     }
     /*
      * TAY - Transfer Accumulator to Y
@@ -208,18 +203,36 @@ impl CPU {
         self.set_zero_and_negative_flag(self.register_a);
     }
 
-    fn set_zero_and_negative_flag(&mut self, param: u8) {
-        if param == 0 {
-            self.set_flag(Flag::Zero, true);
-        } else {
-            self.set_flag(Flag::Zero, false);
-        }
+    fn sta(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.mem_write(addr, self.register_a);
+    }
 
-        if param & 0b1000_0000 != 0 {
-            self.set_flag(Flag::Negative, true);
-        } else {
-            self.set_flag(Flag::Negative, false);
-        }
+    fn ldx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.register_x = self.mem_read(addr);
+        self.set_zero_and_negative_flag(self.register_x);
+    }
+
+    fn stx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.mem_write(addr, self.register_x);
+    }
+
+    fn ldy(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.register_y = self.mem_read(addr);
+        self.set_zero_and_negative_flag(self.register_y);
+    }
+
+    fn sty(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.mem_write(addr, self.register_y);
+    }
+
+    fn set_zero_and_negative_flag(&mut self, param: u8) {
+        self.set_flag(Flag::Zero, param == 0);
+        self.set_flag(Flag::Negative, param & 0b1000_0000 != 0);
     }
 
     fn set_flag(&mut self, flag: Flag, enabled: bool) {
@@ -254,10 +267,13 @@ impl CPU {
                 self.mem_read_u16(self.program_counter) + self.register_y as u16
             }
             AddressingMode::Indirect_X => {
-                todo!()
+                let pos = self.mem_read(self.program_counter) + self.register_x;
+                self.mem_read_u16(pos as u16)
+                // todo!()
             }
             AddressingMode::Indirect_Y => {
-                todo!()
+                let pos = self.mem_read(self.program_counter) + self.register_y;
+                self.mem_read_u16(pos as u16)
             }
             AddressingMode::NoneAddressing => {
                 panic!("mode {:?} is not supported", mode);
@@ -331,6 +347,36 @@ fn test_lda_zero_absolute_y() {
 }
 
 #[test]
+fn test_lda_zero_indirect_x() {
+    let mut cpu = CPU::new();
+    cpu.register_x = 0x01;
+    cpu.register_a = 0x05;
+    cpu.mem_write(0x0001, cpu.register_a);
+    cpu.register_a = 0x07;
+    cpu.mem_write(0x0002, cpu.register_a);
+    cpu.register_y = 0x0a;
+    cpu.mem_write(0x0705, cpu.register_y);
+
+    cpu.load_and_run(vec![0xa1, 0x00, 0x00]);
+
+    assert_eq!(cpu.register_a, 0x0a);
+}
+
+#[test]
+fn test_lda_zero_indirect_y() {
+    let mut cpu = CPU::new();
+
+    cpu.register_y = 0x02;
+    cpu.mem_write_u16(0x0002, 0x0705);
+    cpu.mem_write(0x0705, 0xfa);
+
+    cpu.load_and_run(vec![0xb1, 0x00, 0x00]);
+
+    assert_eq!(cpu.register_a, 0xfa);
+}
+
+
+#[test]
 fn test_0xa9_lda_immediate_load_data() {
     let mut cpu = CPU::new();
     cpu.load_and_run(vec![0xa9, 0x05, 0x00]);
@@ -346,8 +392,42 @@ fn test_0xa9_lda_zero_flag() {
     assert!(cpu.status & 0b0000_0010 == 0b10);
 }
 
+/*
+
+    CPY test cases
+
+*/
+
     #[test]
-    fn test_0xc0_cpy_compare_y_register_set_carry() {
+    fn test_cpy_immediate() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa0, 0x05 ,0xc0 ,0x05, 0x00]);
+        assert!(cpu.status & Flag::Carry as u8 != 0);
+        assert!(cpu.status & Flag::Zero as u8 != 0);
+        assert!(cpu.status & Flag::Negative as u8 == 0);
+    }
+
+    #[test]
+    fn test_cpy_zero() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa0, 0x05 ,0xa2 ,0x04, 0x86, 0x02, 0xc4, 0x02, 0x00]);
+        println!("{}", cpu.status);
+        assert!(cpu.status & Flag::Carry as u8 != 0);
+        assert!(cpu.status & Flag::Zero as u8 == 0);
+        assert!(cpu.status & Flag::Negative as u8 == 0);
+    }
+
+    #[test]
+    fn test_cpy_absolute() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa0, 0x05 ,0xa2 ,0x06, 0x8e, 0x34, 0x12, 0xcc, 0x34, 0x12, 0x00]);
+        assert!(cpu.status & Flag::Carry as u8 == 0);
+        assert!(cpu.status & Flag::Zero as u8 == 0);
+        assert!(cpu.status & Flag::Negative as u8 != 0);
+    }
+
+    #[test]
+    fn test_cpy_compare_y_register_set_carry() {
         let mut cpu = CPU::new();
         cpu.register_y = 0x30;
         cpu.load_and_run(vec![0xc0, 0x29, 0x00]);
@@ -455,6 +535,5 @@ fn test_0xa9_lda_zero_flag() {
         assert!(cpu.status & Flag::Zero as u8 == 0);
         assert!(cpu.status & Flag::Negative as u8 == 0);
     }
-
 
 }
