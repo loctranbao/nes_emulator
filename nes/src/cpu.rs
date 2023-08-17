@@ -127,8 +127,14 @@ impl CPU {
                 0xaa => {
                     self.tax();
                 }
+                0xe0 | 0xe4 | 0xec => {
+                    self.cpx(&opcode.mode);
+                }
                 0xc0 | 0xc4 | 0xcc => {
                     self.cpy(&opcode.mode);
+                }
+                0xc9 | 0xc5 | 0xd5 | 0xcd | 0xdd | 0xd9 | 0xc1 | 0xd1 {
+                    self.cmp(&opcode.mode);
                 }
                 0xa8 => {
                     self.tay();
@@ -171,6 +177,27 @@ impl CPU {
         self.set_flag(Flag::Carry, cmp >= 0);
         self.set_flag(Flag::Negative, cmp < 0);
     }
+
+    fn cpx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let m = self.mem_read(addr);
+        let cmp: i16 = self.register_x as i16 - m as i16;
+
+        self.set_flag(Flag::Zero, cmp == 0);
+        self.set_flag(Flag::Carry, cmp >= 0);
+        self.set_flag(Flag::Negative, cmp < 0);
+    }
+
+    fn cmp(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let m = self.mem_read(addr);
+        let cmp: i16 = self.register_a as i16 - m as i16;
+
+        self.set_flag(Flag::Zero, cmp == 0);
+        self.set_flag(Flag::Carry, cmp >= 0);
+        self.set_flag(Flag::Negative, cmp < 0);
+    }
+
     /*
      * TAY - Transfer Accumulator to Y
      * Y = A
