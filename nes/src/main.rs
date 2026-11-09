@@ -1,10 +1,6 @@
 pub mod cpu;
 pub mod opcodes;
-pub mod bus;
-
-use bus::Mem;
 use cpu::CPU;
-use bus::Bus;
 use rand::Rng;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -126,7 +122,7 @@ fn main() {
     ];
 
     //load the game
-    let mut cpu = CPU::new(Bus::new());
+    let mut cpu = CPU::new();
     cpu.load(game_code);
     cpu.reset();
 
